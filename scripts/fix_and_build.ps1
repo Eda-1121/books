@@ -58,31 +58,51 @@ Write-Host "  Kept: $kept  Removed: $removed (missing or < ${MinImageKB}KB)"
 # Step 3: remove OCR noise  (+++ / $$ etc.)
 # ------------------------------------------------
 Write-Host "`n[3/7] Removing OCR noise..." -ForegroundColor Yellow
-# remove +++ at start of heading lines
 $text = [regex]::Replace($text, '(?m)^(#{1,6}\s*)\+{2,}\s*', '$1')
-# remove lines that are only $ or $$
 $text = [regex]::Replace($text, '(?m)^\$+\s*$', '')
 $text = [regex]::Replace($text, '(?m)^#{1,6}\s*\$+\s*$', '')
 Write-Host "  Done"
 
 # ------------------------------------------------
-# Step 4: fix chapter headings (use actual Unicode chars, not escape literals)
+# Step 4: fix chapter headings
+# All Chinese strings written as PowerShell -f Unicode codepoints to avoid
+# encoding corruption on Windows git pull.
 # ------------------------------------------------
 Write-Host "`n[4/7] Fixing chapter headings..." -ForegroundColor Yellow
 
-# "# 3 谢只" -> "# 序言"
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*3\s*谢只', '# 序言')
-# "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*一\s+切为了您的阅读体验', '## 一切为了您的阅读体验')
-# "尾声瞬间的影响 Influence:..." -> clean title
-$text = $text -replace '尾声瞬间的影响\s*Influence[^\n]*', '尾声 瞬间的影响'
+# helper: build string from codepoints
+function U { param([int[]]$cp) ($cp | ForEach-Object { [char]$_ }) -join '' }
 
-# force 第N章 headings to h1
-$text = [regex]::Replace($text, '(?m)^#{2,6}\s*(第\d+章)', '# $1')
+# "# 3 谢只" -> "# 序言"
+$pat_xieZhi  = '(?m)^#{1,6}\s*3\s*' + [regex]::Escape((U 0x8c22,0x53ea))
+$rep_xuYan   = '# ' + (U 0x5e8f,0x8a00)
+$text = [regex]::Replace($text, $pat_xieZhi, $rep_xuYan)
+
+# "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
+$pat_yiQie   = '(?m)^#{1,6}\s*' + [regex]::Escape((U 0x4e00)) + '\s+' + [regex]::Escape((U 0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c))
+$rep_yiQie   = '## ' + (U 0x4e00,0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c)
+$text = [regex]::Replace($text, $pat_yiQie, $rep_yiQie)
+
+# "尾声瞬间的影响 Influence:..." -> "尾声 瞬间的影响"
+$weiSheng    = (U 0x5c3e,0x58f0,0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
+$weiShengRep = (U 0x5c3e,0x58f0) + ' ' + (U 0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
+$text = [regex]::Replace($text, [regex]::Escape($weiSheng) + '\s*Influence[^\n]*', $weiShengRep)
+
+# force 第N章 to h1
+$diZhang     = (U 0x7b2c) + '\d+' + (U 0x7ae0)
+$text = [regex]::Replace($text, "(?m)^#{2,6}\s*($diZhang)", '# $1')
 
 # force known top-level headings to h1
-foreach ($h in @('序言','引言','尾声','读者报告','影响力水平测试','作者点评')) {
-    $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($h)", '# $1')
+$topHeadings = @(
+    (U 0x5e8f,0x8a00),          # 序言
+    (U 0x5f15,0x8a00),          # 引言
+    (U 0x5c3e,0x58f0),          # 尾声
+    (U 0x8bfb,0x8005,0x62a5,0x544a),                        # 读者报告
+    (U 0x5f71,0x54cd,0x529b,0x6c34,0x5e73,0x6d4b,0x8bd5),  # 影响力水平测试
+    (U 0x4f5c,0x8005,0x70b9,0x8bc4)                         # 作者点评
+)
+foreach ($h in $topHeadings) {
+    $text = [regex]::Replace($text, "(?m)^#{2,6}\s*(" + [regex]::Escape($h) + ")", '# $1')
 }
 Write-Host "  Done"
 
@@ -100,25 +120,32 @@ Write-Host "  Done"
 # Step 5: remove duplicate TOC block
 # ------------------------------------------------
 Write-Host "`n[5/7] Removing duplicate TOC block..." -ForegroundColor Yellow
+# 编辑手记 ... 第1章影响力的武器
+$tocStart = (U 0x7f16,0x8f91,0x624b,0x8bb0)
+$tocEnd   = (U 0x7b2c) + '1' + (U 0x7ae0,0x5f71,0x54cd,0x529b,0x7684,0x6b66,0x5668)
 $text = [regex]::Replace(
     $text,
-    '编辑手记[\s\S]{0,20}关于《影响力》[\s\S]*?第1章影响力的武器[^\n]*\n',
+    $tocStart + '[\s\S]{0,20}' + (U 0x5173,0x4e8e,0x300a,0x5f71,0x54cd,0x529b,0x300b) + '[\s\S]*?' + $tocEnd + '[^\n]*\n',
     '',
     [System.Text.RegularExpressions.RegexOptions]::Singleline
 )
 Write-Host "  Done"
 
 # ------------------------------------------------
-# Step 6: format 专家解读 blocks as blockquotes
+# Step 6: format expert commentary blocks as blockquotes
 # ------------------------------------------------
 Write-Host "`n[6/7] Formatting expert commentary blocks..." -ForegroundColor Yellow
+# 专家 / 解读
+$zhuanJia = (U 0x4e13,0x5bb6)
+$jiedu    = (U 0x89e3,0x8bfb)
+$blockLabel = '> **' + (U 0x300a,0x4e13,0x5bb6,0x89e3,0x8bfb,0x300b) + '**'
 $text = [regex]::Replace(
     $text,
-    '(?m)^专家[^\n]*\n解读[^\n]*\n([\s\S]*?)(?=\n\n|\n#)',
+    "(?m)^$zhuanJia" + '[^\n]*\n' + "$jiedu" + '[^\n]*\n([\s\S]*?)(?=\n\n|\n#)',
     {
         param($m)
         $inner = $m.Groups[1].Value.Trim() -replace '(?m)^', '> '
-        return "`n> **《专家解读》**`n$inner`n"
+        return "`n$blockLabel`n$inner`n"
     }
 )
 Write-Host "  Done"
@@ -126,9 +153,7 @@ Write-Host "  Done"
 # ------------------------------------------------
 # common cleanup
 # ------------------------------------------------
-# compress 4+ blank lines to 2
 $text = [regex]::Replace($text, '(\r?\n){4,}', "`n`n`n")
-# strip trailing spaces
 $text = [regex]::Replace($text, '(?m) +$', '')
 
 # ------------------------------------------------
@@ -140,7 +165,6 @@ $finalPath = "$PaddleOutput\${BookName}_fixed.md"
 [System.IO.File]::WriteAllText($finalPath, $text, $utf8NoBom)
 Write-Host "  Saved: $finalPath"
 
-# CSS
 $cssPath = "$PaddleOutput\epub_style.css"
 $css = @'
 @charset "UTF-8";
@@ -170,7 +194,6 @@ nav#toc li { margin: 0.5em 0; }
 '@
 [System.IO.File]::WriteAllText($cssPath, $css, $utf8NoBom)
 
-# output epub name matches existing convention: BookName.epub (not _fixed)
 $epubPath = "$EpubOutput\${BookName}.epub"
 $pandocArgs = @(
     $finalPath, "-o", $epubPath,
