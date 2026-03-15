@@ -71,45 +71,36 @@ Write-Host "`n[4/7] Fixing chapter headings..." -ForegroundColor Yellow
 function U { param([int[]]$cp) ($cp | ForEach-Object { [char]$_ }) -join '' }
 
 # "# 3 谢只" -> "# 序言"
-$pat_xieZhi  = '(?m)^#{1,6}\s*3\s*' + [regex]::Escape((U 0x8c22,0x53ea))
-$rep_xuYan   = '# ' + (U 0x5e8f,0x8a00)
-$text = [regex]::Replace($text, $pat_xieZhi, $rep_xuYan)
+$pat_xieZhi = '(?m)^#{1,6}\s*3\s*' + [regex]::Escape((U 0x8c22,0x53ea))
+$text = [regex]::Replace($text, $pat_xieZhi, '# ' + (U 0x5e8f,0x8a00))
 
 # "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
-$pat_yiQie   = '(?m)^#{1,6}\s*' + [regex]::Escape((U 0x4e00)) + '\s+' + [regex]::Escape((U 0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c))
-$rep_yiQie   = '## ' + (U 0x4e00,0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c)
-$text = [regex]::Replace($text, $pat_yiQie, $rep_yiQie)
+$pat_yiQie = '(?m)^#{1,6}\s*' + [regex]::Escape((U 0x4e00)) + '\s+' + [regex]::Escape((U 0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c))
+$text = [regex]::Replace($text, $pat_yiQie, '## ' + (U 0x4e00,0x5207,0x4e3a,0x4e86,0x60a8,0x7684,0x9605,0x8bfb,0x4f53,0x9a8c))
 
 # "尾声瞬间的影响 Influence:..." -> "尾声 瞬间的影响"
-$weiSheng    = (U 0x5c3e,0x58f0,0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
-$weiShengRep = (U 0x5c3e,0x58f0) + ' ' + (U 0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
-$text = [regex]::Replace($text, [regex]::Escape($weiSheng) + '\s*Influence[^\n]*', $weiShengRep)
+$weiSheng = (U 0x5c3e,0x58f0,0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
+$text = [regex]::Replace($text, [regex]::Escape($weiSheng) + '\s*Influence[^\n]*',
+    (U 0x5c3e,0x58f0) + ' ' + (U 0x77ac,0x95f4,0x7684,0x5f71,0x54cd))
 
-# ------------------------------------------------
-# Step 4a: force 第N章 lines to h1
-# Case 1: wrong heading level
-# Case 2: plain text (no #) at line start
-# ------------------------------------------------
+# Step 4a: force 第N章 to h1 (wrong level OR no # at all)
 $diZhang = (U 0x7b2c) + '\d+' + (U 0x7ae0)
 $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($diZhang)", '# $1')
 $text = [regex]::Replace($text, "(?m)^(?!#)(\s*)($diZhang)", '# $2')
 
-# ------------------------------------------------
 # Step 4b: clean chapter heading titles
-# Remove: English subtitle, TOC page numbers (…NN), trailing noise
-# e.g. "# 第1章影响力的武器Influence: The Psychology..." -> "# 第1章 影响力的武器"
-# e.g. "# 第2章互惠…27"                                    -> "# 第2章 互惠"
-# ------------------------------------------------
+# - strip English subtitle (Influence...)
+# - strip TOC page numbers (…27 or ...147)
+# - strip trailing non-CJK noise (e.g. "中的", "Influence:...", page refs)
 $text = [regex]::Replace($text, "(?m)^(#+ $diZhang)([^\n]*)", {
     param($m)
-    $prefix = $m.Groups[1].Value   # "# 第N章"
-    $rest   = $m.Groups[2].Value   # everything after
-    # strip English subtitle
+    $prefix = $m.Groups[1].Value
+    $rest   = $m.Groups[2].Value
     $rest = [regex]::Replace($rest, '\s*Influence[^\u4e00-\u9fff]*', '')
-    # strip TOC page numbers like ‐27  or ...147
-    $rest = [regex]::Replace($rest, '[\u2026.\s]*\d+\s*$', '')
-    # strip trailing noise after last CJK char
-    $rest = [regex]::Replace($rest, '([\u4e00-\u9fff])\s*[^\u4e00-\u9fff\s]*$', '$1')
+    $rest = [regex]::Replace($rest, '[\u2026\.\s]*\d+\s*$', '')
+    # keep only up to and including the last meaningful CJK word (2+ chars)
+    # strip trailing fragments like "中的", "中的一", lone chars after main title
+    $rest = [regex]::Replace($rest, '([\u4e00-\u9fff]{2,})\s*[\u4e00-\u9fff]{0,2}[^\u4e00-\u9fff\s]*$', '$1')
     $rest = $rest.Trim()
     if ($rest) { return "$prefix $rest" } else { return $prefix }
 })
@@ -128,36 +119,48 @@ foreach ($h in $topHeadings) {
     $text = [regex]::Replace($text, "(?m)^#{2,6}\s*(" + [regex]::Escape($h) + ")", '# $1')
 }
 
-# ------------------------------------------------
 # Step 4c: convert any remaining \uXXXX literals
-# ------------------------------------------------
 $text = [regex]::Replace($text, '\\u([0-9a-fA-F]{4})', {
-    param($m)
-    [char][Convert]::ToInt32($m.Groups[1].Value, 16)
+    param($m); [char][Convert]::ToInt32($m.Groups[1].Value, 16)
 })
 Write-Host "  Done (Unicode escape literals)"
 
 # ------------------------------------------------
-# Step 5: remove duplicate TOC block
-# Matches from "编辑手记" through the TOC listing up to the real 第1章 heading
+# Step 5: remove the pre-body chapter-intro block
+# Structure:
+#   [front matter] ... 作者小传 ...
+#   # 第1章 XXX   <- intro listing (fake, delete this block)
+#   # 第2章 XXX
+#   ...
+#   # 第7章 XXX
+#   # 尾声 ...
+#   # 第1章 XXX   <- REAL chapter (keep from here)
+#
+# Strategy: find the SECOND occurrence of "# 第1章" and delete everything
+# between the first and second occurrence.
 # ------------------------------------------------
-Write-Host "`n[5/7] Removing duplicate TOC block..." -ForegroundColor Yellow
-$tocStart = (U 0x7f16,0x8f91,0x624b,0x8bb0)
-# Match the block ending just before the first real "# 第1章" heading line
-$text = [regex]::Replace(
-    $text,
-    $tocStart + '[\s\S]*?(?=\n# ' + (U 0x7b2c) + '1' + (U 0x7ae0) + ')',
-    '',
-    [System.Text.RegularExpressions.RegexOptions]::Singleline
-)
-Write-Host "  Done"
+Write-Host "`n[5/7] Removing chapter-intro block..." -ForegroundColor Yellow
+$ch1Pattern = '# ' + (U 0x7b2c) + '1' + (U 0x7ae0)
+$idx1 = $text.IndexOf("`n$ch1Pattern")
+if ($idx1 -ge 0) {
+    $idx2 = $text.IndexOf("`n$ch1Pattern", $idx1 + 1)
+    if ($idx2 -ge 0) {
+        # delete from first occurrence start up to (not including) second occurrence's newline
+        $text = $text.Substring(0, $idx1) + $text.Substring($idx2)
+        Write-Host "  Removed intro block (lines between first and second # 第1章)"
+    } else {
+        Write-Host "  Only one # 第1章 found, nothing removed"
+    }
+} else {
+    Write-Host "  # 第1章 not found"
+}
 
 # ------------------------------------------------
 # Step 6: format expert commentary blocks as blockquotes
 # ------------------------------------------------
 Write-Host "`n[6/7] Formatting expert commentary blocks..." -ForegroundColor Yellow
-$zhuanJia = (U 0x4e13,0x5bb6)
-$jiedu    = (U 0x89e3,0x8bfb)
+$zhuanJia   = (U 0x4e13,0x5bb6)
+$jiedu      = (U 0x89e3,0x8bfb)
 $blockLabel = '> **' + (U 0x300a,0x4e13,0x5bb6,0x89e3,0x8bfb,0x300b) + '**'
 $text = [regex]::Replace(
     $text,
