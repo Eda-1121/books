@@ -88,9 +88,23 @@ $weiSheng    = (U 0x5c3e,0x58f0,0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
 $weiShengRep = (U 0x5c3e,0x58f0) + ' ' + (U 0x77ac,0x95f4,0x7684,0x5f71,0x54cd)
 $text = [regex]::Replace($text, [regex]::Escape($weiSheng) + '\s*Influence[^\n]*', $weiShengRep)
 
-# force 第N章 to h1
-$diZhang     = (U 0x7b2c) + '\d+' + (U 0x7ae0)
+# ------------------------------------------------
+# Step 4a: force 第N章 lines to h1
+# Handles THREE cases:
+#   1. Already a heading with wrong level: "## 第3章..."
+#   2. Plain text line (no #) at line start: "第2章互惠Influence:..."
+#   3. Plain text with leading whitespace stripped by OCR
+# ------------------------------------------------
+$diZhang = (U 0x7b2c) + '\d+' + (U 0x7ae0)
+
+# Case 1: wrong heading level (## or deeper)
 $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($diZhang)", '# $1')
+
+# Case 2 & 3: no heading marker at all — line starts directly with 第N章
+# We anchor to start-of-line and require the char before 第 is nothing (or whitespace only).
+$text = [regex]::Replace($text, "(?m)^(?!#)(\s*)($diZhang)", '# $2')
+
+Write-Host "  Done (第N章 -> h1, all cases)"
 
 # force known top-level headings to h1
 $topHeadings = @(
@@ -104,7 +118,7 @@ $topHeadings = @(
 foreach ($h in $topHeadings) {
     $text = [regex]::Replace($text, "(?m)^#{2,6}\s*(" + [regex]::Escape($h) + ")", '# $1')
 }
-Write-Host "  Done"
+Write-Host "  Done (top-level headings)"
 
 # ------------------------------------------------
 # Step 4b: convert any remaining \uXXXX literals to real characters
