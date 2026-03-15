@@ -17,6 +17,9 @@ if (-not $BookTitle) { $BookTitle = $BookName }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " Fix & Build EPUB: $BookTitle"           -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Script  : $PSCommandPath"
+Write-Host "  Input   : $PaddleOutput\${BookName}_combined.md"
+Write-Host "  Output  : $EpubOutput\${BookName}.epub"
 
 # ------------------------------------------------
 # Step 1: read combined.md
@@ -24,13 +27,13 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "`n[1/7] Reading combined markdown..." -ForegroundColor Yellow
 $combinedPath = "$PaddleOutput\${BookName}_combined.md"
 if (-not (Test-Path $combinedPath)) {
-    Write-Host "ERROR: $combinedPath not found" -ForegroundColor Red; exit 1
+    Write-Host "ERROR: not found -> $combinedPath" -ForegroundColor Red; exit 1
 }
 $text = [System.IO.File]::ReadAllText($combinedPath, [System.Text.Encoding]::UTF8)
-Write-Host "  Read: $combinedPath"
+Write-Host "  OK: $combinedPath"
 
 # ------------------------------------------------
-# Step 2: filter images
+# Step 2: filter missing / tiny images
 # ------------------------------------------------
 Write-Host "`n[2/7] Filtering images..." -ForegroundColor Yellow
 $kept = 0; $removed = 0
@@ -52,10 +55,12 @@ $text = [regex]::Replace($text, '!\[([^\]]*)\]\(([^)]*)\)', {
 Write-Host "  Kept: $kept  Removed: $removed (missing or < ${MinImageKB}KB)"
 
 # ------------------------------------------------
-# Step 3: remove OCR noise
+# Step 3: remove OCR noise  (+++ / $$ etc.)
 # ------------------------------------------------
 Write-Host "`n[3/7] Removing OCR noise..." -ForegroundColor Yellow
+# remove +++ at start of heading lines
 $text = [regex]::Replace($text, '(?m)^(#{1,6}\s*)\+{2,}\s*', '$1')
+# remove lines that are only $ or $$
 $text = [regex]::Replace($text, '(?m)^\$+\s*$', '')
 $text = [regex]::Replace($text, '(?m)^#{1,6}\s*\$+\s*$', '')
 Write-Host "  Done"
@@ -65,19 +70,19 @@ Write-Host "  Done"
 # ------------------------------------------------
 Write-Host "`n[4/7] Fixing chapter headings..." -ForegroundColor Yellow
 
-# fix known wrong titles
+# "# 3 谢只" -> "# 序言"
 $text = [regex]::Replace($text, '(?m)^#{1,6}\s*3\s*\u8c22\u53ea', '# \u5e8f\u8a00')
+# "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
 $text = [regex]::Replace($text, '(?m)^#{1,6}\s*\u4e00\s+\u5207\u4e3a\u4e86\u60a8\u7684\u9605\u8bfb\u4f53\u9a8c', '## \u4e00\u5207\u4e3a\u4e86\u60a8\u7684\u9605\u8bfb\u4f53\u9a8c')
+# "尾声瞬间的影响 Influence:..." -> clean title
 $text = $text -replace '\u5c3e\u58f0\u77ac\u95f4\u7684\u5f71\u54cd\s*Influence[^\n]*', '\u5c3e\u58f0 \u77ac\u95f4\u7684\u5f71\u54cd'
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*\u7b2c3\u7ae0\u627f\u8bfa\u548c\u4e00\u81f4\u4e2d\u7684[^\n]*', '# \u7b2c3\u7ae0 \u627f\u8bfa\u548c\u4e00\u81f4')
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*\u4eec\s*\u7b2c4\u7ae0\u793e\u4f1a\u8ba4\u540c\u5c31[^\n]*', '# \u7b2c4\u7ae0 \u793e\u4f1a\u8ba4\u540c')
 
-# force all chapter headings to h1
+# force 第N章 headings to h1
 $text = [regex]::Replace($text, '(?m)^#{2,6}\s*(\u7b2c\d+\u7ae0)', '# $1')
 
-# force specific headings to h1
+# force known top-level headings to h1
 foreach ($h in @('\u5e8f\u8a00','\u5f15\u8a00','\u5c3e\u58f0','\u8bfb\u8005\u62a5\u544a','\u5f71\u54cd\u529b\u6c34\u5e73\u6d4b\u8bd5','\u4f5c\u8005\u70b9\u8bc4')) {
-    $text = [regex]::Replace($text, "(?m)^#{2,6}\\s*($h)", '# $1')
+    $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($h)", '# $1')
 }
 Write-Host "  Done"
 
@@ -94,7 +99,7 @@ $text = [regex]::Replace(
 Write-Host "  Done"
 
 # ------------------------------------------------
-# Step 6: format zhuan jia jie du blocks
+# Step 6: format 专家解读 blocks as blockquotes
 # ------------------------------------------------
 Write-Host "`n[6/7] Formatting expert commentary blocks..." -ForegroundColor Yellow
 $text = [regex]::Replace(
@@ -111,11 +116,13 @@ Write-Host "  Done"
 # ------------------------------------------------
 # common cleanup
 # ------------------------------------------------
+# compress 4+ blank lines to 2
 $text = [regex]::Replace($text, '(\r?\n){4,}', "`n`n`n")
+# strip trailing spaces
 $text = [regex]::Replace($text, '(?m) +$', '')
 
 # ------------------------------------------------
-# Step 7: save fixed.md and build EPUB
+# Step 7: save fixed.md -> build EPUB
 # ------------------------------------------------
 Write-Host "`n[7/7] Writing fixed markdown & building EPUB..." -ForegroundColor Yellow
 
@@ -123,6 +130,7 @@ $finalPath = "$PaddleOutput\${BookName}_fixed.md"
 [System.IO.File]::WriteAllText($finalPath, $text, $utf8NoBom)
 Write-Host "  Saved: $finalPath"
 
+# CSS
 $cssPath = "$PaddleOutput\epub_style.css"
 $css = @'
 @charset "UTF-8";
@@ -152,7 +160,8 @@ nav#toc li { margin: 0.5em 0; }
 '@
 [System.IO.File]::WriteAllText($cssPath, $css, $utf8NoBom)
 
-$epubPath = "$EpubOutput\${BookName}_fixed.epub"
+# output epub name matches existing convention: BookName.epub (not _fixed)
+$epubPath = "$EpubOutput\${BookName}.epub"
 $pandocArgs = @(
     $finalPath, "-o", $epubPath,
     "--metadata", "title=$BookTitle",
