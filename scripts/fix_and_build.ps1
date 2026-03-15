@@ -65,12 +65,9 @@ Write-Host "  Done"
 
 # ------------------------------------------------
 # Step 4: fix chapter headings
-# All Chinese strings written as PowerShell -f Unicode codepoints to avoid
-# encoding corruption on Windows git pull.
 # ------------------------------------------------
 Write-Host "`n[4/7] Fixing chapter headings..." -ForegroundColor Yellow
 
-# helper: build string from codepoints
 function U { param([int[]]$cp) ($cp | ForEach-Object { [char]$_ }) -join '' }
 
 # "# 3 谢只" -> "# 序言"
@@ -90,56 +87,66 @@ $text = [regex]::Replace($text, [regex]::Escape($weiSheng) + '\s*Influence[^\n]*
 
 # ------------------------------------------------
 # Step 4a: force 第N章 lines to h1
-# Handles THREE cases:
-#   1. Already a heading with wrong level: "## 第3章..."
-#   2. Plain text line (no #) at line start: "第2章互惠Influence:..."
-#   3. Plain text with leading whitespace stripped by OCR
+# Case 1: wrong heading level
+# Case 2: plain text (no #) at line start
 # ------------------------------------------------
 $diZhang = (U 0x7b2c) + '\d+' + (U 0x7ae0)
-
-# Case 1: wrong heading level (## or deeper)
 $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($diZhang)", '# $1')
-
-# Case 2 & 3: no heading marker at all — line starts directly with 第N章
-# We anchor to start-of-line and require the char before 第 is nothing (or whitespace only).
 $text = [regex]::Replace($text, "(?m)^(?!#)(\s*)($diZhang)", '# $2')
 
-Write-Host "  Done (第N章 -> h1, all cases)"
+# ------------------------------------------------
+# Step 4b: clean chapter heading titles
+# Remove: English subtitle, TOC page numbers (…NN), trailing noise
+# e.g. "# 第1章影响力的武器Influence: The Psychology..." -> "# 第1章 影响力的武器"
+# e.g. "# 第2章互惠…27"                                    -> "# 第2章 互惠"
+# ------------------------------------------------
+$text = [regex]::Replace($text, "(?m)^(#+ $diZhang)([^\n]*)", {
+    param($m)
+    $prefix = $m.Groups[1].Value   # "# 第N章"
+    $rest   = $m.Groups[2].Value   # everything after
+    # strip English subtitle
+    $rest = [regex]::Replace($rest, '\s*Influence[^\u4e00-\u9fff]*', '')
+    # strip TOC page numbers like ‐27  or ...147
+    $rest = [regex]::Replace($rest, '[\u2026.\s]*\d+\s*$', '')
+    # strip trailing noise after last CJK char
+    $rest = [regex]::Replace($rest, '([\u4e00-\u9fff])\s*[^\u4e00-\u9fff\s]*$', '$1')
+    $rest = $rest.Trim()
+    if ($rest) { return "$prefix $rest" } else { return $prefix }
+})
+Write-Host "  Done (第N章 -> h1, titles cleaned)"
 
 # force known top-level headings to h1
 $topHeadings = @(
-    (U 0x5e8f,0x8a00),          # 序言
-    (U 0x5f15,0x8a00),          # 引言
-    (U 0x5c3e,0x58f0),          # 尾声
-    (U 0x8bfb,0x8005,0x62a5,0x544a),                        # 读者报告
-    (U 0x5f71,0x54cd,0x529b,0x6c34,0x5e73,0x6d4b,0x8bd5),  # 影响力水平测试
-    (U 0x4f5c,0x8005,0x70b9,0x8bc4)                         # 作者点评
+    (U 0x5e8f,0x8a00),
+    (U 0x5f15,0x8a00),
+    (U 0x5c3e,0x58f0),
+    (U 0x8bfb,0x8005,0x62a5,0x544a),
+    (U 0x5f71,0x54cd,0x529b,0x6c34,0x5e73,0x6d4b,0x8bd5),
+    (U 0x4f5c,0x8005,0x70b9,0x8bc4)
 )
 foreach ($h in $topHeadings) {
     $text = [regex]::Replace($text, "(?m)^#{2,6}\s*(" + [regex]::Escape($h) + ")", '# $1')
 }
-Write-Host "  Done (top-level headings)"
 
 # ------------------------------------------------
-# Step 4b: convert any remaining \uXXXX literals to real characters
+# Step 4c: convert any remaining \uXXXX literals
 # ------------------------------------------------
-Write-Host "`n[4b] Converting leftover Unicode escape literals..." -ForegroundColor Yellow
 $text = [regex]::Replace($text, '\\u([0-9a-fA-F]{4})', {
     param($m)
     [char][Convert]::ToInt32($m.Groups[1].Value, 16)
 })
-Write-Host "  Done"
+Write-Host "  Done (Unicode escape literals)"
 
 # ------------------------------------------------
 # Step 5: remove duplicate TOC block
+# Matches from "编辑手记" through the TOC listing up to the real 第1章 heading
 # ------------------------------------------------
 Write-Host "`n[5/7] Removing duplicate TOC block..." -ForegroundColor Yellow
-# 编辑手记 ... 第1章影响力的武器
 $tocStart = (U 0x7f16,0x8f91,0x624b,0x8bb0)
-$tocEnd   = (U 0x7b2c) + '1' + (U 0x7ae0,0x5f71,0x54cd,0x529b,0x7684,0x6b66,0x5668)
+# Match the block ending just before the first real "# 第1章" heading line
 $text = [regex]::Replace(
     $text,
-    $tocStart + '[\s\S]{0,20}' + (U 0x5173,0x4e8e,0x300a,0x5f71,0x54cd,0x529b,0x300b) + '[\s\S]*?' + $tocEnd + '[^\n]*\n',
+    $tocStart + '[\s\S]*?(?=\n# ' + (U 0x7b2c) + '1' + (U 0x7ae0) + ')',
     '',
     [System.Text.RegularExpressions.RegexOptions]::Singleline
 )
@@ -149,7 +156,6 @@ Write-Host "  Done"
 # Step 6: format expert commentary blocks as blockquotes
 # ------------------------------------------------
 Write-Host "`n[6/7] Formatting expert commentary blocks..." -ForegroundColor Yellow
-# 专家 / 解读
 $zhuanJia = (U 0x4e13,0x5bb6)
 $jiedu    = (U 0x89e3,0x8bfb)
 $blockLabel = '> **' + (U 0x300a,0x4e13,0x5bb6,0x89e3,0x8bfb,0x300b) + '**'
