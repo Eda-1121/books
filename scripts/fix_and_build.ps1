@@ -66,24 +66,34 @@ $text = [regex]::Replace($text, '(?m)^#{1,6}\s*\$+\s*$', '')
 Write-Host "  Done"
 
 # ------------------------------------------------
-# Step 4: fix chapter headings
+# Step 4: fix chapter headings (use actual Unicode chars, not escape literals)
 # ------------------------------------------------
 Write-Host "`n[4/7] Fixing chapter headings..." -ForegroundColor Yellow
 
 # "# 3 谢只" -> "# 序言"
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*3\s*\u8c22\u53ea', '# \u5e8f\u8a00')
+$text = [regex]::Replace($text, '(?m)^#{1,6}\s*3\s*谢只', '# 序言')
 # "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
-$text = [regex]::Replace($text, '(?m)^#{1,6}\s*\u4e00\s+\u5207\u4e3a\u4e86\u60a8\u7684\u9605\u8bfb\u4f53\u9a8c', '## \u4e00\u5207\u4e3a\u4e86\u60a8\u7684\u9605\u8bfb\u4f53\u9a8c')
+$text = [regex]::Replace($text, '(?m)^#{1,6}\s*一\s+切为了您的阅读体验', '## 一切为了您的阅读体验')
 # "尾声瞬间的影响 Influence:..." -> clean title
-$text = $text -replace '\u5c3e\u58f0\u77ac\u95f4\u7684\u5f71\u54cd\s*Influence[^\n]*', '\u5c3e\u58f0 \u77ac\u95f4\u7684\u5f71\u54cd'
+$text = $text -replace '尾声瞬间的影响\s*Influence[^\n]*', '尾声 瞬间的影响'
 
 # force 第N章 headings to h1
-$text = [regex]::Replace($text, '(?m)^#{2,6}\s*(\u7b2c\d+\u7ae0)', '# $1')
+$text = [regex]::Replace($text, '(?m)^#{2,6}\s*(第\d+章)', '# $1')
 
 # force known top-level headings to h1
-foreach ($h in @('\u5e8f\u8a00','\u5f15\u8a00','\u5c3e\u58f0','\u8bfb\u8005\u62a5\u544a','\u5f71\u54cd\u529b\u6c34\u5e73\u6d4b\u8bd5','\u4f5c\u8005\u70b9\u8bc4')) {
+foreach ($h in @('序言','引言','尾声','读者报告','影响力水平测试','作者点评')) {
     $text = [regex]::Replace($text, "(?m)^#{2,6}\s*($h)", '# $1')
 }
+Write-Host "  Done"
+
+# ------------------------------------------------
+# Step 4b: convert any remaining \uXXXX literals to real characters
+# ------------------------------------------------
+Write-Host "`n[4b] Converting leftover Unicode escape literals..." -ForegroundColor Yellow
+$text = [regex]::Replace($text, '\\u([0-9a-fA-F]{4})', {
+    param($m)
+    [char][Convert]::ToInt32($m.Groups[1].Value, 16)
+})
 Write-Host "  Done"
 
 # ------------------------------------------------
@@ -92,7 +102,7 @@ Write-Host "  Done"
 Write-Host "`n[5/7] Removing duplicate TOC block..." -ForegroundColor Yellow
 $text = [regex]::Replace(
     $text,
-    '\u7f16\u8f91\u624b\u8bb0[\s\S]{0,20}\u5173\u4e8e\u300a\u5f71\u54cd\u529b\u300b[\s\S]*?\u7b2c1\u7ae0\u5f71\u54cd\u529b\u7684\u6b66\u5668[^\n]*\n',
+    '编辑手记[\s\S]{0,20}关于《影响力》[\s\S]*?第1章影响力的武器[^\n]*\n',
     '',
     [System.Text.RegularExpressions.RegexOptions]::Singleline
 )
@@ -104,11 +114,11 @@ Write-Host "  Done"
 Write-Host "`n[6/7] Formatting expert commentary blocks..." -ForegroundColor Yellow
 $text = [regex]::Replace(
     $text,
-    '(?m)^\u4e13\u5bb6[^\n]*\n\u89e3\u8bfb[^\n]*\n([\s\S]*?)(?=\n\n|\n#)',
+    '(?m)^专家[^\n]*\n解读[^\n]*\n([\s\S]*?)(?=\n\n|\n#)',
     {
         param($m)
         $inner = $m.Groups[1].Value.Trim() -replace '(?m)^', '> '
-        return "`n> **\u300a\u4e13\u5bb6\u89e3\u8bfb\u300b**`n$inner`n"
+        return "`n> **《专家解读》**`n$inner`n"
     }
 )
 Write-Host "  Done"
