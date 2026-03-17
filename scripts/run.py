@@ -2,14 +2,11 @@
 """
 run.py
 PDF → EPUB 変換をワンコマンドで実行する。
+引数なしで実行すると対話形式で入力を求める。
 
 Usage:
+    python E:\\Books\\pdf2epub\\scripts\\run.py
     python E:\\Books\\pdf2epub\\scripts\\run.py --book 易经 --title "易经" --author "著者名"
-
-Steps:
-    1. PaddleOCR でPDFをOCR
-    2. clean_and_combine.py でMDを結合・クリーンアップ
-    3. fix_and_build.py でMDを整形しEPUBをビルド
 """
 
 import argparse
@@ -22,7 +19,7 @@ SCRIPTS_DIR = Path(__file__).parent
 
 def parse_args():
     p = argparse.ArgumentParser(description="PDF → EPUB 全工程一括実行")
-    p.add_argument("--book",         required=True,  help="本の名前（PDFファイル名と一致）")
+    p.add_argument("--book",         default="",     help="本の名前（PDFファイル名と一致）")
     p.add_argument("--title",        default="",     help="EPUBのタイトル（省略時は bookと同じ）")
     p.add_argument("--author",       default="",     help="EPUBの著者名")
     p.add_argument("--lang",         default="zh-CN",help="言語コード")
@@ -31,8 +28,30 @@ def parse_args():
     p.add_argument("--md",           default=r"E:\Books\pdf2epub\md",    help="MD保存先")
     p.add_argument("--epub",         default=r"E:\Books\epub",           help="EPUB保存先")
     p.add_argument("--min-image-kb", type=int, default=5)
-    p.add_argument("--skip-ocr",     action="store_true", help="Step 1（OCR）をスキップ（MDが既にある場合）")
+    p.add_argument("--skip-ocr",     action="store_true", help="Step 1（OCR）をスキップ")
     return p.parse_args()
+
+
+def prompt(args):
+    """未入力の項目を対話形式で聞く"""
+    print("\n========================================")
+    print(" PDF → EPUB コンバーター")
+    print("========================================")
+
+    if not args.book:
+        args.book = input("Book name : ").strip()
+        if not args.book:
+            print("ERROR: Book name is required.", file=sys.stderr)
+            sys.exit(1)
+
+    if not args.title:
+        val = input(f"Title      [Enter = {args.book}]: ").strip()
+        args.title = val or args.book
+
+    if not args.author:
+        args.author = input("Author     [Enter to skip]: ").strip()
+
+    return args
 
 
 def run(cmd: list, step: str):
@@ -47,9 +66,10 @@ def run(cmd: list, step: str):
 
 def main():
     args = parse_args()
+    args = prompt(args)
     title = args.title or args.book
 
-    # 元PDFを検索（サブフォルダも含めて探す）
+    # PDFを検索（サブフォルダも含めて探す）
     pdf_base = Path(args.pdf)
     pdf_path = None
     for candidate in pdf_base.rglob(f"{args.book}.pdf"):
