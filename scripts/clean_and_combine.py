@@ -2,25 +2,46 @@
 """
 clean_and_combine.py
 OCR出力の個別Markdownファイルを結合して {BookName}_combined.md を生成する。
+不要ファイル（.docx / .tex / _res.json / デバッグPNG）も自動削除する。
 
 Usage:
-    python scripts/clean_and_combine.py --book 影响力
-    python scripts/clean_and_combine.py --book 影响力 --paddle E:\\Books\\paddle_output --epub E:\\Books\\epub
+    python scripts/clean_and_combine.py --book 易经
+    python scripts/clean_and_combine.py --book 易经 --paddle E:\\Books\\paddle_output --epub E:\\Books\\epub
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
 
+JUNK_PATTERNS = [
+    "*.docx",
+    "*.tex",
+    "*_res.json",
+    "*_layout_det_res.png",
+    "*_layout_order_res.png",
+    "*_overall_ocr_res.png",
+    "*_preprocessed_img.png",
+    "*_region_det_res.png",
+]
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="Combine OCR Markdown pages")
-    p.add_argument("--book",   required=True, help="Book name (e.g. 影响力)")
+    p.add_argument("--book",   required=True, help="Book name (e.g. 易经)")
     p.add_argument("--paddle", default=r"E:\Books\paddle_output", help="PaddleOCR output directory")
     p.add_argument("--epub",   default=r"E:\Books\epub",          help="EPUB output directory")
     return p.parse_args()
+
+
+def cleanup_junk(paddle_dir: Path):
+    """PaddleOCRが生成する不要ファイルを削除"""
+    removed = 0
+    for pattern in JUNK_PATTERNS:
+        for f in paddle_dir.glob(pattern):
+            f.unlink()
+            removed += 1
+    print(f"Cleaned up {removed} junk files")
 
 
 def filter_images(text: str, paddle_dir: Path) -> str:
@@ -68,6 +89,9 @@ def main():
     out_path = paddle_dir / f"{args.book}_combined.md"
     out_path.write_text(combined, encoding="utf-8")
     print(f"Combined MD: {out_path}")
+
+    # 不要ファイルを削除
+    cleanup_junk(paddle_dir)
 
 
 if __name__ == "__main__":
