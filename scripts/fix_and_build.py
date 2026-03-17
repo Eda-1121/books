@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 
-# ──────────────────────────────────────────────
 EPUB_CSS = """@charset "UTF-8";
 body {
     font-family: "Noto Serif CJK SC","Source Han Serif SC","Songti SC","SimSun","STSong",serif;
@@ -56,12 +55,12 @@ def parse_args():
     return p.parse_args()
 
 
-def filter_images(text: str, paddle_dir: Path, min_kb: int) -> tuple[str, int, int]:
+def filter_images(text: str, book_dir: Path, min_kb: int) -> tuple[str, int, int]:
     kept = removed = 0
 
     def check(path_str):
         nonlocal kept, removed
-        p = paddle_dir / path_str
+        p = book_dir / path_str
         if p.exists() and p.stat().st_size / 1024 >= min_kb:
             kept += 1
             return True
@@ -80,16 +79,14 @@ def filter_images(text: str, paddle_dir: Path, min_kb: int) -> tuple[str, int, i
 
 
 def remove_ocr_noise(text: str) -> str:
-    """汎用OCRノイズ除去: 記号のみの行・空見出しを削除"""
     text = re.sub(r'(?m)^(#{1,6}\s*)\+{2,}\s*', r'\1', text)
     text = re.sub(r'(?m)^\$+\s*$', '', text)
     text = re.sub(r'(?m)^#{1,6}\s*\$+\s*$', '', text)
-    text = re.sub(r'(?m)^[\-\*\_]{3,}\s*$', '', text)  # 区切り線ノイズ
+    text = re.sub(r'(?m)^[\-\*\_]{3,}\s*$', '', text)
     return text
 
 
 def fix_headings(text: str) -> str:
-    """第N章パターンをh1に統一（汎用）"""
     text = re.sub(r'(?m)^#{2,6}\s*(第\d+章)', r'# \1', text)
     text = re.sub(r'(?m)^(?!#)(\s*)(第\d+章)', r'# \2', text)
     return text
@@ -106,14 +103,14 @@ def write_css(path: Path):
 
 
 def build_epub(fixed_path: Path, epub_path: Path, css_path: Path,
-               title: str, author: str, lang: str, paddle_dir: Path) -> int:
+               title: str, author: str, lang: str, book_dir: Path) -> int:
     cmd = [
         "pandoc", str(fixed_path), "-o", str(epub_path),
         "--metadata", f"title={title}",
         "--metadata", f"lang={lang}",
         "-f", "markdown", "-t", "epub3",
         f"--css={css_path}",
-        f"--resource-path={paddle_dir}",
+        f"--resource-path={book_dir}",
         "--epub-chapter-level=1",
         "--toc", "--toc-depth=2",
     ]
@@ -125,8 +122,9 @@ def build_epub(fixed_path: Path, epub_path: Path, css_path: Path,
 
 def main():
     args = parse_args()
-    paddle_dir = Path(args.paddle)
-    epub_dir   = Path(args.epub)
+    # 本ごとのサブフォルダ: paddle_output/{book}/
+    book_dir = Path(args.paddle) / args.book
+    epub_dir = Path(args.epub)
     epub_dir.mkdir(parents=True, exist_ok=True)
     title = args.title or args.book
 
@@ -134,14 +132,14 @@ def main():
     print(f" Fix & Build EPUB: {title}")
     print("========================================")
 
-    combined_path = paddle_dir / f"{args.book}_combined.md"
+    combined_path = book_dir / f"{args.book}_combined.md"
     if not combined_path.exists():
         print(f"ERROR: not found -> {combined_path}", file=sys.stderr)
         sys.exit(1)
     text = combined_path.read_text(encoding="utf-8")
     print(f"[1/5] Read: {combined_path}")
 
-    text, kept, removed = filter_images(text, paddle_dir, args.min_image_kb)
+    text, kept, removed = filter_images(text, book_dir, args.min_image_kb)
     print(f"[2/5] Images: kept={kept} removed={removed}")
 
     text = remove_ocr_noise(text)
@@ -152,16 +150,16 @@ def main():
 
     text = common_cleanup(text)
 
-    fixed_path = paddle_dir / f"{args.book}_fixed.md"
+    fixed_path = book_dir / f"{args.book}_fixed.md"
     fixed_path.write_text(text, encoding="utf-8")
     print(f"[5/5] Saved: {fixed_path}")
 
-    css_path  = paddle_dir / "epub_style.css"
+    css_path  = book_dir / "epub_style.css"
     write_css(css_path)
 
     epub_path = epub_dir / f"{args.book}.epub"
     rc = build_epub(fixed_path, epub_path, css_path,
-                    title, args.author, args.lang, paddle_dir)
+                    title, args.author, args.lang, book_dir)
 
     if rc == 0:
         print("\n========================================")
