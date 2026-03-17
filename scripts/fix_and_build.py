@@ -4,8 +4,8 @@ fix_and_build.py
 {BookName}_combined.md を整形して {BookName}_fixed.md を生成し、pandoc で EPUB をビルドする。
 
 Usage:
-    python scripts/fix_and_build.py --book 影响力 --title "影响力" --author "[美]罗伯特·西奥迪尼"
-    python scripts/fix_and_build.py --book 影响力 --title "影响力" --author "[美]罗伯特·西奥迪尼" \\
+    python scripts/fix_and_build.py --book 易经 --title "易经" --author "著者名"
+    python scripts/fix_and_build.py --book 易经 --title "易经" \\
         --paddle E:\\Books\\paddle_output --epub E:\\Books\\epub
 """
 
@@ -80,73 +80,18 @@ def filter_images(text: str, paddle_dir: Path, min_kb: int) -> tuple[str, int, i
 
 
 def remove_ocr_noise(text: str) -> str:
+    """汎用OCRノイズ除去: 記号のみの行・空見出しを削除"""
     text = re.sub(r'(?m)^(#{1,6}\s*)\+{2,}\s*', r'\1', text)
     text = re.sub(r'(?m)^\$+\s*$', '', text)
     text = re.sub(r'(?m)^#{1,6}\s*\$+\s*$', '', text)
+    text = re.sub(r'(?m)^[\-\*\_]{3,}\s*$', '', text)  # 区切り線ノイズ
     return text
 
 
 def fix_headings(text: str) -> str:
-    # "# 3 谢只" -> "# 序言"
-    text = re.sub(r'(?m)^#{1,6}\s*3\s*谢只', '# 序言', text)
-
-    # "## 一 切为了您的阅读体验" -> "## 一切为了您的阅读体验"
-    text = re.sub(r'(?m)^#{1,6}\s*一\s+切为了您的阅读体验', '## 一切为了您的阅读体验', text)
-
-    # 尾声英語サブタイトル除去
-    text = re.sub(r'尾声瞬间的影响\s*Influence[^\n]*', '尾声 瞬间的影响', text)
-
-    # Step 4a: 第N章 → h1
-    text = re.sub(r'(?m)^#{2,6}\s*(第\d+章)', r'# \1', text)  # レベル深すぎ
-    text = re.sub(r'(?m)^(?!#)(\s*)(第\d+章)', r'# \2', text)  # # なし
-
-    # Step 4b: 章タイトルのゴミを除去
-    def clean_chapter_title(m):
-        prefix = m.group(1)
-        rest   = m.group(2)
-        rest = re.sub(r'\s*Influence[^\u4e00-\u9fff]*', '', rest)
-        rest = re.sub(r'[\u2026\.\s]*\d+\s*$', '', rest)
-        rest = re.sub(r'([\u4e00-\u9fff]{2,})\s*[\u4e00-\u9fff]{0,2}[^\u4e00-\u9fff\s]*$',
-                      r'\1', rest)
-        rest = rest.strip()
-        return f"{prefix} {rest}" if rest else prefix
-
-    text = re.sub(r'(?m)^(#+ 第\d+章)([^\n]*)', clean_chapter_title, text)
-
-    # トップレベル見出し → h1
-    for h in ['序言', '引言', '尾声', '读者报告', '影响力水平测试', '作者点评']:
-        # rf文字列内で {2,6} をリテラルにするため # と分離して連結
-        pat = r'(?m)^#' + r'{2,6}' + r'\s*(' + re.escape(h) + r')'
-        text = re.sub(pat, r'# \1', text)
-
-    return text
-
-
-def remove_intro_block(text: str) -> str:
-    marker = '\n# 第1章'
-    idx1 = text.find(marker)
-    if idx1 < 0:
-        print("  # 第1章 not found, skipping")
-        return text
-    idx2 = text.find(marker, idx1 + 1)
-    if idx2 < 0:
-        print("  Only one # 第1章 found, skipping")
-        return text
-    print(f"  Removed intro block ({idx2 - idx1} chars)")
-    return text[:idx1] + text[idx2:]
-
-
-def format_expert_blocks(text: str) -> str:
-    def replacer(m):
-        inner = m.group(1).strip()
-        inner = re.sub(r'(?m)^', '> ', inner)
-        return f"\n> **《专家解读》**\n{inner}\n"
-
-    text = re.sub(
-        r'(?m)^专家[^\n]*\n解读[^\n]*\n([\s\S]*?)(?=\n\n|\n#)',
-        replacer,
-        text
-    )
+    """第N章パターンをh1に統一（汎用）"""
+    text = re.sub(r'(?m)^#{2,6}\s*(第\d+章)', r'# \1', text)
+    text = re.sub(r'(?m)^(?!#)(\s*)(第\d+章)', r'# \2', text)
     return text
 
 
@@ -194,28 +139,22 @@ def main():
         print(f"ERROR: not found -> {combined_path}", file=sys.stderr)
         sys.exit(1)
     text = combined_path.read_text(encoding="utf-8")
-    print(f"[1/7] Read: {combined_path}")
+    print(f"[1/5] Read: {combined_path}")
 
     text, kept, removed = filter_images(text, paddle_dir, args.min_image_kb)
-    print(f"[2/7] Images: kept={kept} removed={removed}")
+    print(f"[2/5] Images: kept={kept} removed={removed}")
 
     text = remove_ocr_noise(text)
-    print("[3/7] OCR noise removed")
+    print("[3/5] OCR noise removed")
 
     text = fix_headings(text)
-    print("[4/7] Headings fixed")
-
-    text = remove_intro_block(text)
-    print("[5/7] Intro block removed")
-
-    text = format_expert_blocks(text)
-    print("[6/7] Expert blocks formatted")
+    print("[4/5] Headings fixed")
 
     text = common_cleanup(text)
 
     fixed_path = paddle_dir / f"{args.book}_fixed.md"
     fixed_path.write_text(text, encoding="utf-8")
-    print(f"[7/7] Saved: {fixed_path}")
+    print(f"[5/5] Saved: {fixed_path}")
 
     css_path  = paddle_dir / "epub_style.css"
     write_css(css_path)
