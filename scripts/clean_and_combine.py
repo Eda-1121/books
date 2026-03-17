@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 clean_and_combine.py
-OCR出力の個別Markdownファイルを結合して {BookName}_combined.md を生成する。
+OCR出力の個別Markdownファイルを結合して md/{BookName}_combined.md を生成する。
 不要ファイル（.docx / .tex / _res.json / デバッグPNG）も自動削除する。
 
 Usage:
     python scripts/clean_and_combine.py --book 易经
-    python scripts/clean_and_combine.py --book 易经 --paddle E:\\Books\\paddle_output --epub E:\\Books\\epub
+    python scripts/clean_and_combine.py --book 易经 \
+        --paddle E:\\Books\\paddle_output \
+        --md E:\\Books\\pdf2epub\\md
 """
 
 import argparse
@@ -30,12 +32,11 @@ def parse_args():
     p = argparse.ArgumentParser(description="Combine OCR Markdown pages")
     p.add_argument("--book",   required=True, help="Book name (e.g. 易经)")
     p.add_argument("--paddle", default=r"E:\Books\paddle_output", help="PaddleOCR base output directory")
-    p.add_argument("--epub",   default=r"E:\Books\epub",          help="EPUB output directory")
+    p.add_argument("--md",     default=r"E:\Books\pdf2epub\md",   help="Output directory for combined MD")
     return p.parse_args()
 
 
 def cleanup_junk(book_dir: Path):
-    """PaddleOCRが生成する不要ファイルを削除"""
     removed = 0
     for pattern in JUNK_PATTERNS:
         for f in book_dir.glob(pattern):
@@ -45,7 +46,6 @@ def cleanup_junk(book_dir: Path):
 
 
 def filter_images(text: str, book_dir: Path) -> str:
-    """存在しない画像の参照を削除する"""
     def check_div_img(m):
         return m.group(0) if (book_dir / m.group(1)).exists() else ""
 
@@ -59,12 +59,14 @@ def filter_images(text: str, book_dir: Path) -> str:
 
 def main():
     args = parse_args()
-    # 本ごとのサブフォルダ: paddle_output/{book}/
     book_dir = Path(args.paddle) / args.book
-    epub_dir = Path(args.epub)
-    epub_dir.mkdir(parents=True, exist_ok=True)
+    md_dir   = Path(args.md)
+    md_dir.mkdir(parents=True, exist_ok=True)
 
-    # ページ番号順にソート: {BookName}_1.md, {BookName}_2.md ...
+    if not book_dir.exists():
+        print(f"ERROR: Directory not found -> {book_dir}", file=sys.stderr)
+        sys.exit(1)
+
     pattern = re.compile(rf"^{re.escape(args.book)}_(\d+)\.md$")
     md_files = sorted(
         [f for f in book_dir.iterdir()
@@ -85,7 +87,7 @@ def main():
         parts.append(text)
 
     combined = "\n\n".join(parts)
-    out_path = book_dir / f"{args.book}_combined.md"
+    out_path = md_dir / f"{args.book}_combined.md"
     out_path.write_text(combined, encoding="utf-8")
     print(f"Combined MD: {out_path}")
 

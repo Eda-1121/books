@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 fix_and_build.py
-{BookName}_combined.md を整形して {BookName}_fixed.md を生成し、pandoc で EPUB をビルドする。
+md/{BookName}_combined.md を整形して md/{BookName}_fixed.md を生成し、pandoc で EPUB をビルドする。
 
 Usage:
     python scripts/fix_and_build.py --book 易经 --title "易经" --author "著者名"
-    python scripts/fix_and_build.py --book 易经 --title "易经" \\
-        --paddle E:\\Books\\paddle_output --epub E:\\Books\\epub
+    python scripts/fix_and_build.py --book 易经 --title "易经" \
+        --paddle E:\\Books\\paddle_output \
+        --md     E:\\Books\\pdf2epub\\md \
+        --epub   E:\\Books\\epub
 """
 
 import argparse
@@ -47,6 +49,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Fix Markdown and build EPUB")
     p.add_argument("--book",         required=True)
     p.add_argument("--paddle",       default=r"E:\Books\paddle_output")
+    p.add_argument("--md",           default=r"E:\Books\pdf2epub\md")
     p.add_argument("--epub",         default=r"E:\Books\epub")
     p.add_argument("--title",        default="")
     p.add_argument("--author",       default="")
@@ -122,8 +125,8 @@ def build_epub(fixed_path: Path, epub_path: Path, css_path: Path,
 
 def main():
     args = parse_args()
-    # 本ごとのサブフォルダ: paddle_output/{book}/
-    book_dir = Path(args.paddle) / args.book
+    book_dir = Path(args.paddle) / args.book   # 画像参照用
+    md_dir   = Path(args.md)
     epub_dir = Path(args.epub)
     epub_dir.mkdir(parents=True, exist_ok=True)
     title = args.title or args.book
@@ -132,7 +135,7 @@ def main():
     print(f" Fix & Build EPUB: {title}")
     print("========================================")
 
-    combined_path = book_dir / f"{args.book}_combined.md"
+    combined_path = md_dir / f"{args.book}_combined.md"
     if not combined_path.exists():
         print(f"ERROR: not found -> {combined_path}", file=sys.stderr)
         sys.exit(1)
@@ -150,11 +153,11 @@ def main():
 
     text = common_cleanup(text)
 
-    fixed_path = book_dir / f"{args.book}_fixed.md"
+    fixed_path = md_dir / f"{args.book}_fixed.md"
     fixed_path.write_text(text, encoding="utf-8")
     print(f"[5/5] Saved: {fixed_path}")
 
-    css_path  = book_dir / "epub_style.css"
+    css_path = md_dir / "epub_style.css"
     write_css(css_path)
 
     epub_path = epub_dir / f"{args.book}.epub"
