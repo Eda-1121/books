@@ -6,9 +6,7 @@ OCR出力の個別Markdownファイルを結合して md/{BookName}_combined.md 
 
 Usage:
     python scripts/clean_and_combine.py --book 易经
-    python scripts/clean_and_combine.py --book 易经 \
-        --paddle E:\\Books\\paddle_output \
-        --md E:\\Books\\pdf2epub\\md
+    python scripts/clean_and_combine.py --book 易经 --paddle E:\\Books\\paddle_output --md E:\\Books\\pdf2epub\\md
 """
 
 import argparse
@@ -16,10 +14,20 @@ import re
 import sys
 from pathlib import Path
 
+# 本ごとサブフォルダ内の不要ファイル
 JUNK_PATTERNS = [
     "*.docx",
     "*.tex",
     "*_res.json",
+    "*_layout_det_res.png",
+    "*_layout_order_res.png",
+    "*_overall_ocr_res.png",
+    "*_preprocessed_img.png",
+    "*_region_det_res.png",
+]
+
+# paddle_outputルート直下に流れ出るデバッグPNG
+ROOT_JUNK_PATTERNS = [
     "*_layout_det_res.png",
     "*_layout_order_res.png",
     "*_overall_ocr_res.png",
@@ -36,16 +44,24 @@ def parse_args():
     return p.parse_args()
 
 
-def cleanup_junk(book_dir: Path):
+def cleanup_junk(book_dir: Path, paddle_base: Path):
+    """bookフォルダ内およびpaddle_outputルートの不要ファイルを削除"""
     removed = 0
+    # 本ごとサブフォルダ内
     for pattern in JUNK_PATTERNS:
         for f in book_dir.glob(pattern):
+            f.unlink()
+            removed += 1
+    # paddle_outputルート直下
+    for pattern in ROOT_JUNK_PATTERNS:
+        for f in paddle_base.glob(pattern):
             f.unlink()
             removed += 1
     print(f"Cleaned up {removed} junk files")
 
 
 def filter_images(text: str, book_dir: Path) -> str:
+    """存在しない画像の参照を削除する"""
     def check_div_img(m):
         return m.group(0) if (book_dir / m.group(1)).exists() else ""
 
@@ -59,8 +75,9 @@ def filter_images(text: str, book_dir: Path) -> str:
 
 def main():
     args = parse_args()
-    book_dir = Path(args.paddle) / args.book
-    md_dir   = Path(args.md)
+    paddle_base = Path(args.paddle)
+    book_dir    = paddle_base / args.book
+    md_dir      = Path(args.md)
     md_dir.mkdir(parents=True, exist_ok=True)
 
     if not book_dir.exists():
@@ -91,7 +108,7 @@ def main():
     out_path.write_text(combined, encoding="utf-8")
     print(f"Combined MD: {out_path}")
 
-    cleanup_junk(book_dir)
+    cleanup_junk(book_dir, paddle_base)
 
 
 if __name__ == "__main__":

@@ -125,7 +125,8 @@ def build_epub(fixed_path: Path, epub_path: Path, css_path: Path,
 
 def main():
     args = parse_args()
-    book_dir = Path(args.paddle) / args.book   # 画像参照用
+    # paddle_output/{book}/ → 画像参照およびCSSの保存先
+    book_dir = Path(args.paddle) / args.book
     md_dir   = Path(args.md)
     epub_dir = Path(args.epub)
     epub_dir.mkdir(parents=True, exist_ok=True)
@@ -157,7 +158,8 @@ def main():
     fixed_path.write_text(text, encoding="utf-8")
     print(f"[5/5] Saved: {fixed_path}")
 
-    css_path = md_dir / "epub_style.css"
+    # CSSは本ごとの paddle_output/{book}/ に保存
+    css_path = book_dir / "epub_style.css"
     write_css(css_path)
 
     epub_path = epub_dir / f"{args.book}.epub"
