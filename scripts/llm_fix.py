@@ -25,8 +25,8 @@ except ImportError:
     print("ERROR: google-generativeai not installed. Run: pip install google-generativeai", file=sys.stderr)
     sys.exit(1)
 
-# .env をプロジェクトルートから読み込む
-ENV_PATH = Path(__file__).parent.parent / ".env"
+# .env を scripts/ フォルダから読み込む
+ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(ENV_PATH)
 
 SYSTEM_PROMPT = """あなたは書籍の編集者です。
@@ -42,8 +42,8 @@ OCRで取得したMarkdownテキストを整形するタスクを行います。
 7. 出力はMarkdown形式のみ。説明文や前置きは一切不要
 """
 
-CHUNK_CHARS = 12000   # 1回に送る文字数の目安
-RETRY_WAIT  = 10      # レートリミット時の待機秒数
+CHUNK_CHARS = 12000
+RETRY_WAIT  = 10
 
 
 def parse_args():
@@ -55,7 +55,6 @@ def parse_args():
 
 
 def split_chunks(text: str, max_chars: int) -> list[str]:
-    """\n\n単位で分割し、max_chars以内にまとめる"""
     paragraphs = text.split("\n\n")
     chunks, current = [], ""
     for para in paragraphs:
@@ -82,7 +81,7 @@ def fix_chunk(model, chunk: str, idx: int, total: int) -> str:
                 time.sleep(RETRY_WAIT)
             else:
                 print(f"  ERROR on chunk {idx+1}: {e}", file=sys.stderr)
-                return chunk  # 失敗時は元のテキストをそのまま使用
+                return chunk
     return chunk
 
 
@@ -113,7 +112,7 @@ def main():
     fixed_parts = []
     for i, chunk in enumerate(chunks):
         fixed_parts.append(fix_chunk(model, chunk, i, total))
-        time.sleep(1)  # レートリミット回避
+        time.sleep(1)
 
     out_path = md_dir / f"{args.book}_llm_fixed.md"
     out_path.write_text("\n\n".join(fixed_parts), encoding="utf-8")
