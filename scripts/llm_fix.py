@@ -3,6 +3,9 @@
 llm_fix.py
 _combined.md を Gemini API で整形し _llm_fixed.md を生成する。
 
+Dependencies:
+    pip install google-genai python-dotenv
+
 Usage:
     python E:\\Books\\pdf2epub\\scripts\\llm_fix.py --book 易经
 """
@@ -20,12 +23,12 @@ except ImportError:
     sys.exit(1)
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
-    print("ERROR: google-generativeai not installed. Run: pip install google-generativeai", file=sys.stderr)
+    print("ERROR: google-genai not installed. Run: pip install google-genai", file=sys.stderr)
     sys.exit(1)
 
-# .env を scripts/ フォルダから読み込む
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(ENV_PATH)
 
@@ -68,15 +71,19 @@ def split_chunks(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def fix_chunk(model, chunk: str, idx: int, total: int) -> str:
+def fix_chunk(client, model: str, chunk: str, idx: int, total: int) -> str:
     prompt = f"{SYSTEM_PROMPT}\n\n---\n\n{chunk}"
     for attempt in range(3):
         try:
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=model,
+                contents=[types.Part.from_text(prompt)],
+            )
             print(f"  chunk {idx+1}/{total} done")
             return response.text
         except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
+            err = str(e)
+            if "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err:
                 print(f"  Rate limit, waiting {RETRY_WAIT}s...")
                 time.sleep(RETRY_WAIT)
             else:
@@ -106,12 +113,11 @@ def main():
     print(f" LLM Fix: {args.book}  ({total} chunks)")
     print(f"========================================")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(args.model)
+    client = genai.Client(api_key=api_key)
 
     fixed_parts = []
     for i, chunk in enumerate(chunks):
-        fixed_parts.append(fix_chunk(model, chunk, i, total))
+        fixed_parts.append(fix_chunk(client, args.model, chunk, i, total))
         time.sleep(1)
 
     out_path = md_dir / f"{args.book}_llm_fixed.md"
