@@ -62,7 +62,7 @@ def parse_args():
     p.add_argument("--book",   required=True)
     p.add_argument("--pdf",    default=r"E:\Books\pdf")
     p.add_argument("--md",     default=r"E:\Books\pdf2epub\md")
-    p.add_argument("--model",  default="gemini-2.0-flash")
+    p.add_argument("--model",  default="gemini-2.5-flash")
     p.add_argument("--start",  type=int, default=1)
     p.add_argument("--end",    type=int, default=None)
     p.add_argument("--dpi",    type=int, default=DPI)
