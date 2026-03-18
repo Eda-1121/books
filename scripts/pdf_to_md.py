@@ -82,6 +82,19 @@ def page_to_bytes(page, dpi: int) -> bytes:
     return pix.tobytes("png")
 
 
+def extract_text(response) -> str:
+    """response.text が None の場合に parts から直接テキストを取得する。"""
+    if response.text is not None:
+        return response.text
+    # gemini-2.5-flash thinking mode: partsを直接參照
+    try:
+        parts = response.candidates[0].content.parts
+        texts = [p.text for p in parts if hasattr(p, "text") and p.text]
+        return "\n".join(texts)
+    except Exception:
+        return ""
+
+
 def process_page(client, model: str, page, page_num: int, total: int, dpi: int) -> str:
     img_bytes = page_to_bytes(page, dpi)
     contents = types.Content(
@@ -97,8 +110,9 @@ def process_page(client, model: str, page, page_num: int, total: int, dpi: int) 
                 model=model,
                 contents=contents,
             )
+            text = extract_text(response)
             print(f"  p.{page_num}/{total} done")
-            return response.text
+            return text
         except Exception as e:
             err = str(e)
             if "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err:
