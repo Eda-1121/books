@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
 build_epub.py
-既存の整形済み Markdown (_fixed.md または任意) から EPUB だけを生成する薄いラッパー。
+_llm_fixed.md （または _combined.md）から EPUB をビルドする。
 
 Usage:
-    python scripts/build_epub.py --book 影响力
-    python scripts/build_epub.py --book 影响力 --title "影响力" --author "[美]罗伯特·西奥迪尼"
-    python scripts/build_epub.py --book 影响力 --md E:\\Books\\paddle_output\\影响力_fixed.md
+    python E:\\Books\\pdf2epub\\scripts\\build_epub.py --book 易经 --title "易经" --author "著者名"
 """
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+
 
 EPUB_CSS = """@charset "UTF-8";
 body {
@@ -42,54 +41,98 @@ nav#toc li { margin: 0.5em 0; }
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Build EPUB from fixed Markdown")
-    p.add_argument("--book",   required=True)
-    p.add_argument("--paddle", default=r"E:\Books\paddle_output")
-    p.add_argument("--epub",   default=r"E:\Books\epub")
-    p.add_argument("--md",     default="",  help="Override input markdown path")
-    p.add_argument("--title",  default="")
-    p.add_argument("--author", default="")
-    p.add_argument("--lang",   default="zh-CN")
+    p = argparse.ArgumentParser(description="MD → EPUB ビルド")
+    p.add_argument("--book",         required=True)
+    p.add_argument("--paddle",       default=r"E:\Books\paddle_output")
+    p.add_argument("--md",           default=r"E:\Books\pdf2epub\md")
+    p.add_argument("--epub",         default=r"E:\Books\epub")
+    p.add_argument("--title",        default="")
+    p.add_argument("--author",       default="")
+    p.add_argument("--lang",         default="zh-CN")
+    p.add_argument("--min-image-kb", type=int, default=5)
+    p.add_argument("--no-llm",       action="store_true", help="_combined.mdを使用（LLM整形なし）")
     return p.parse_args()
+
+
+def filter_images(text: str, book_dir: Path, min_kb: int) -> tuple[str, int, int]:
+    import re
+    kept = removed = 0
+
+    def check(path_str):
+        nonlocal kept, removed
+        p = book_dir / path_str
+        if p.exists() and p.stat().st_size / 1024 >= min_kb:
+            kept += 1
+            return True
+        removed += 1
+        return False
+
+    def sub_div(m):
+        return m.group(0) if check(m.group(1)) else ""
+
+    def sub_md(m):
+        return m.group(0) if check(m.group(2)) else ""
+
+    text = re.sub(r'<div[^>]*><img\s+src="([^"]*)"[^>]*></div>', sub_div, text)
+    text = re.sub(r'(!\[[^\]]*\]\()([^)]*)(\))', sub_md, text)
+    return text, kept, removed
 
 
 def main():
     args = parse_args()
-    paddle_dir = Path(args.paddle)
-    epub_dir   = Path(args.epub)
+    book_dir = Path(args.paddle) / args.book
+    md_dir   = Path(args.md)
+    epub_dir = Path(args.epub)
     epub_dir.mkdir(parents=True, exist_ok=True)
     title = args.title or args.book
 
-    md_path = Path(args.md) if args.md else paddle_dir / f"{args.book}_fixed.md"
+    # 入力 MD の優先順位: _llm_fixed.md > _combined.md
+    if args.no_llm:
+        md_path = md_dir / f"{args.book}_combined.md"
+    else:
+        md_path = md_dir / f"{args.book}_llm_fixed.md"
+        if not md_path.exists():
+            print(f"WARNING: _llm_fixed.md not found, falling back to _combined.md")
+            md_path = md_dir / f"{args.book}_combined.md"
+
     if not md_path.exists():
         print(f"ERROR: not found -> {md_path}", file=sys.stderr)
         sys.exit(1)
 
-    css_path = paddle_dir / "epub_style.css"
+    print("========================================")
+    print(f" Build EPUB: {title}")
+    print(f" Input: {md_path.name}")
+    print("========================================")
+
+    text = md_path.read_text(encoding="utf-8")
+    text, kept, removed = filter_images(text, book_dir, args.min_image_kb)
+    print(f"Images: kept={kept} removed={removed}")
+
+    # CSSは本ごとの paddle_outputフォルダに保存
+    css_path = book_dir / "epub_style.css"
     css_path.write_text(EPUB_CSS, encoding="utf-8")
 
     epub_path = epub_dir / f"{args.book}.epub"
-
     cmd = [
         "pandoc", str(md_path), "-o", str(epub_path),
         "--metadata", f"title={title}",
         "--metadata", f"lang={args.lang}",
         "-f", "markdown", "-t", "epub3",
         f"--css={css_path}",
-        f"--resource-path={paddle_dir}",
+        f"--resource-path={book_dir}",
         "--epub-chapter-level=1",
         "--toc", "--toc-depth=2",
     ]
     if args.author:
         cmd += ["--metadata", f"author={args.author}"]
 
-    print(f"Building EPUB: {epub_path}")
     result = subprocess.run(cmd)
-
     if result.returncode == 0:
-        print(f"\nEPUB created: {epub_path}")
+        print(f"\n========================================")
+        print(f" EPUB created: {epub_path}")
+        print(f"========================================")
     else:
-        print(f"\nCompleted with warnings: {epub_path}")
+        print(f"Completed with warnings: {epub_path}")
 
 
 if __name__ == "__main__":

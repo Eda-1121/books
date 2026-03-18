@@ -2,11 +2,23 @@
 
 ## 必要なツール
 
-- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (`paddleocr` コマンド)
+- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
 - [Pandoc](https://pandoc.org/)
 - Python 3.10+
+- `pip install google-generativeai python-dotenv`
 
-> **環境**: PowerShell で実行することを前提としています。
+---
+
+## 初回セットアップ
+
+1. `.env.example` をコピーして `.env` を作成
+2. `.env` の `GEMINI_API_KEY` に自分のキーを記入
+
+```powershell
+cd E:\Books
+copy .env.example .env
+notepad .env
+```
 
 ---
 
@@ -14,101 +26,87 @@
 
 ```
 E:\Books\
+├── .env                         # APIキー（要作成）
+├── .env.example                 # テンプレート
 ├── epub\                        # 完成EPUB
-├── paddle_output\               # OCR作業フォルダ（一時ファイル）
-│   ├── 易经\                   # 本ごとのサブフォルダ
-│   └── ...
-├── pdf\                         # 元PDF（サブフォルダ可）
-└── pdf2epub\                     # 作業フォルダ
-    ├── md\                      # 結合・EPUB用MD
-    └── scripts\                 # スクリプト
-        ├── run.py           # ★ 一括実行（推奨）
-        ├── clean_and_combine.py
-        ├── fix_and_build.py
+├── paddle_output\               # OCR作業フォルダ
+│   └── {本名}\
+├── pdf\                         # 元PDF
+└── pdf2epub\
+    ├── md\                      # MDファイル
+    └── scripts\
+        ├── run.py           # ★ 一括実行
+        ├── clean_and_combine.py  # Step 2
+        ├── llm_fix.py            # Step 3
+        ├── build_epub.py         # Step 4
         └── README.md
 ```
 
 ---
 
-## 基本の使い方（推奨）
+## 基本の使い方
 
 ```powershell
 python E:\Books\pdf2epub\scripts\run.py
 ```
 
-実行後、以下のように入力を求められます：
+実行後、以下を入力：
 
 ```
-========================================
- PDF → EPUB コンバーター
-========================================
 Book name : 易经
-Title      [Enter = 摑经]: 
- Author     [Enter to skip]: 著者名
+Title      [Enter = 易经]:
+Author     [Enter to skip]: 著者名
 ```
-
-- **Book name**: `E:\Books\pdf\` 以下のPDFファイル名（拡張子なし）
-- **Title**: Enterで本の名前をそのまま使用
-- **Author**: Enterでスキップ可能
-
-完成ファイル: `E:\Books\epub\{本の名前}.epub`
 
 ---
 
-## 引数で指定する場合
+## 処理ステップ
 
-```powershell
-python E:\Books\pdf2epub\scripts\run.py --book 易经 --title "易经" --author "著者名"
-```
-
-**run.py のオプション：**
-
-| オプション | デフォルト | 説明 |
-|---|---|---|
-| `--book` | （対話入力） | 本の名前 |
-| `--title` | bookと同じ | EPUBのタイトル |
-| `--author` | 空 | EPUBの著者名 |
-| `--lang` | `zh-CN` | 言語コード |
-| `--skip-ocr` | なし | OCRをスキップ（MDが既存の場合） |
-| `--pdf` | `E:\Books\pdf` | PDF元フォルダ |
-| `--paddle` | `E:\Books\paddle_output` | OCR出力フォルダ |
-| `--md` | `E:\Books\pdf2epub\md` | MD保存先 |
-| `--epub` | `E:\Books\epub` | EPUB保存先 |
+| Step | スクリプト | 内容 | 出力 |
+|---|---|---|---|
+| 1 | OCR | PDF→MD (PaddleOCR) | `paddle_output/{book}/` |
+| 2 | Combine | ページ結合・クリーンアップ | `md/{book}_combined.md` |
+| 3 | LLM Fix | Geminiで整形 | `md/{book}_llm_fixed.md` |
+| 4 | EPUB | pandocでEPUB化 | `epub/{book}.epub` |
 
 ---
 
-## 内部動作（各Stepの詳細）
-
-### Step 1 — OCR（PDF → Markdown）
+## 个別実行
 
 ```powershell
-paddleocr pp_structurev3 -i "E:\Books\pdf\{本の名前}.pdf" --use_doc_orientation_classify False --use_doc_unwarping False --use_formula_recognition False --save_path "E:\Books\paddle_output\{本の名前}"
+# Step 2のみ
+python E:\Books\pdf2epub\scripts\clean_and_combine.py --book 易经
+
+# Step 3のみ
+python E:\Books\pdf2epub\scripts\llm_fix.py --book 易经
+
+# Step 4のみ
+python E:\Books\pdf2epub\scripts\build_epub.py --book 易经 --title "易经" --author "著者名"
 ```
-
-### Step 2 — MD結合・クリーンアップ
-
-```powershell
-python E:\Books\pdf2epub\scripts\clean_and_combine.py --book {本の名前}
-```
-
-処理内容：`paddle_output\{本の名前}\` 内のMDを結合 → `pdf2epub\md\{本の名前}_combined.md` を生成、不要ファイルを自動削除
-
-### Step 3 — MD整形・EPUBビルド
-
-```powershell
-python E:\Books\pdf2epub\scripts\fix_and_build.py --book {本の名前} --title "表示タイトル" --author "著者名"
-```
-
-処理内容：OCRノイズ除去・見出し整理 → `pdf2epub\md\{本の名前}_fixed.md` を生成しEPUB化
 
 ---
 
-## MDを手動で修正したい場合
-
-Step 2 完了後、`pdf2epub\md\{本の名前}_combined.md` を編集してから、`--skip-ocr` を付けて実行：
+## スキップオプション
 
 ```powershell
-python E:\Books\pdf2epub\scripts\run.py --skip-ocr
+# OCR済みの場合（Step 1をスキップ）
+python run.py --skip-ocr
+
+# LLM整形なしでEPUB化
+python run.py --skip-llm
+
+# OCRと結合のみ（EPUB化なし）
+python run.py --skip-llm --skip-epub
+```
+
+---
+
+## MDを手動修正する場合
+
+Step 3完了後、`md\{book}_llm_fixed.md` を編集してから：
+
+```powershell
+python E:\Books\pdf2epub\scripts\build_epub.py --book 易经 --title "易经"
 ```
 
 ---
@@ -116,11 +114,11 @@ python E:\Books\pdf2epub\scripts\run.py --skip-ocr
 ## 出力ファイルの流れ
 
 ```
-paddle_output\{本の名前}\{本の名前}_0.md ~ _N.md   # Step 1: PaddleOCR生成
+paddle_output\{book}\{book}_N.md     # Step 1: OCR
     ↓ clean_and_combine.py
-pdf2epub\md\{本の名前}_combined.md                  # Step 2: 結合済み
-    ↓ fix_and_build.py
-pdf2epub\md\{本の名前}_fixed.md                    # Step 3: 整形済み
-    ↓ pandoc
-epub\{本の名前}.epub                               # 完成
+md\{book}_combined.md                # Step 2: 結合
+    ↓ llm_fix.py
+md\{book}_llm_fixed.md               # Step 3: LLM整形
+    ↓ build_epub.py
+epub\{book}.epub                     # Step 4: 完成
 ```
