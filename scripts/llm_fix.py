@@ -24,7 +24,6 @@ except ImportError:
 
 try:
     from google import genai
-    from google.genai import types
 except ImportError:
     print("ERROR: google-genai not installed. Run: pip install google-genai", file=sys.stderr)
     sys.exit(1)
@@ -77,7 +76,7 @@ def fix_chunk(client, model: str, chunk: str, idx: int, total: int) -> str:
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[types.Part.from_text(prompt)],
+                contents=prompt,
             )
             print(f"  chunk {idx+1}/{total} done")
             return response.text

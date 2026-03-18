@@ -32,7 +32,6 @@ except ImportError:
 
 try:
     from google import genai
-    from google.genai import types
 except ImportError:
     print("ERROR: google-genai not installed. Run: pip install google-genai", file=sys.stderr)
     sys.exit(1)
@@ -89,8 +88,8 @@ def process_page(client, model: str, page, page_num: int, total: int, dpi: int) 
             response = client.models.generate_content(
                 model=model,
                 contents=[
-                    types.Part.from_text(PAGE_PROMPT),
-                    types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+                    PAGE_PROMPT,
+                    {"mime_type": "image/png", "data": img_bytes},
                 ],
             )
             print(f"  p.{page_num}/{total} done")
