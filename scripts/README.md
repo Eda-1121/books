@@ -2,12 +2,12 @@
 
 ## 必要なツール
 
-- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
+- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)（textモードのみ）
 - [Pandoc](https://pandoc.org/)
 - Python 3.10+
 
 ```powershell
-pip install google-generativeai python-dotenv pymupdf
+pip install pymupdf google-genai python-dotenv
 ```
 
 ---
@@ -31,7 +31,7 @@ Gemini APIキーの取得: https://aistudio.google.com/apikey
 ```
 E:\Books\
 ├── epub\                        # 完成EPUB
-├── paddle_output\               # OCR作業フォルダ　※方法1のみ使用
+├── paddle_output\               # PaddleOCR作業フォルダ（textモードのみ）
 │   └── {本名}\
 ├── pdf\                         # 元PDF（サブフォルダ可）
 └── pdf2epub\
@@ -39,8 +39,8 @@ E:\Books\
     └── scripts\
         ├── .env             # APIキー（要作成）
         ├── .env.example     # テンプレート
-        ├── run.py           # 方法1: 一括実行
-        ├── pdf_to_md.py     # 方法2: PDF→MD（Vision直接）
+        ├── run.py           # 全工程一括実行（おすすめ）
+        ├── pdf_to_md.py     # PDF→MD（自動判定/Vision/テキスト）
         ├── clean_and_combine.py
         ├── llm_fix.py
         ├── build_epub.py
@@ -49,12 +49,10 @@ E:\Books\
 
 ---
 
-## 方法1: OCR + LLM整形（推奨）
-
-PaddleOCRでテキスト抽出 → Geminiで構造整形。
-**APIコストが少ない。**
+## クイックスタート
 
 ```powershell
+# 自動判定で全工程実行（おすすめ）
 python E:\Books\pdf2epub\scripts\run.py
 ```
 
@@ -65,93 +63,195 @@ Title      [Enter = 易经]:
 Author     [Enter to skip]: 著者名
 ```
 
-### 処理ステップ
+---
 
-| Step | スクリプト | 内容 | 出力 |
-|---|---|---|---|
-| 1 | `run.py` 内 | PDF→OCR (PaddleOCR) | `paddle_output/{book}/` |
-| 2 | `clean_and_combine.py` | ページ結合・クリーンアップ | `md/{book}_combined.md` |
-| 3 | `llm_fix.py` | GeminiでMD整形 | `md/{book}_llm_fixed.md` |
-| 4 | `build_epub.py` | MD→EPUB | `epub/{book}.epub` |
+## 処理モード
+
+`run.py` および `pdf_to_md.py` は3つのモードをサポートします。
+
+| モード | 内容 | 向いているPDF |
+|---|---|---|
+| `auto` | PDFを自動判定（デフォルト） | どちらでも |
+| `vision` | Gemini Vision OCR | スキャンPDF・画像PDF |
+| `text` | 直接テキスト抽出（API不要） | テキスト埋め込みPDF |
+
+### 自動判定の仕組み
+
+先頭5ページの平均文字数で判定します。
+
+```
+1ページ平均 ≥ 50文字  →  テキストPDF（textモード）
+1ページ平均 < 50文字  →  画像PDF（visionモード）
+```
+
+閾値は `--threshold` で変更可能。
+
+---
+
+## run.py 全工程一括実行
+
+### 基本コマンド
+
+```powershell
+# 自動判定（おすすめ）
+python run.py --book 易经
+
+# 画像PDF（Vision）で完全幸理
+ python run.py --book 叔本华论说文集 --mode vision --llm-fix
+
+# テキストPDFをLLM整形なしで高速変換
+ python run.py --book 甲与权力 --mode text --skip-llm
+
+# 途中から再開（Visionのみ）
+ python run.py --book 叔本华论说文集 --mode vision --resume
+```
+
+### ステップ別の処理内容
+
+**Visionモード（画像PDF）:**
+
+| Step | 内容 | 出力 |
+|---|---|---|
+| 1+3 | Gemini Vision OCR → MD（+ LLM整形） | `md/{book}_vision.md` or `_llm_fixed.md` |
+| 4 | MD → EPUB | `epub/{book}.epub` |
+
+**Textモード（テキストPDF）:**
+
+| Step | 内容 | 出力 |
+|---|---|---|
+| 1 | テキスト抽出 | `md/{book}_vision.md` |
+| 2 | PaddleOCR結合（旧来フロー継続用） | `md/{book}_combined.md` |
+| 3 | LLM整形 | `md/{book}_llm_fixed.md` |
+| 4 | MD → EPUB | `epub/{book}.epub` |
 
 ### スキップオプション
 
 ```powershell
-# OCR済みの場合
-python run.py --skip-ocr
-
-# EPUB化は後で手動でやる
-python run.py --skip-epub
-
-# LLM整形なし
-python run.py --skip-llm
+--skip-ocr      # Step 1 をスキップ（OCR済の場合）
+--skip-combine  # Step 2 をスキップ
+--skip-llm      # Step 3 をスキップ
+--skip-epub     # Step 4 をスキップ
 ```
 
 ---
 
-## 方法2: PDF → MD（Gemini Vision直接）
-
-PDFページを画像化してGeminiにVision解析させる。
-**レイアウト誤認が少ない。APIコストが高い。**
+## pdf_to_md.py 単体実行
 
 ```powershell
-# 全ページ処理
-python E:\Books\pdf2epub\scripts\pdf_to_md.py --book 易经
+# 自動判定
+python pdf_to_md.py --book 易经
+
+# Vision強制（スキャンPDF）
+python pdf_to_md.py --book 叔本华论说文集 --mode vision
+
+# テキスト抽出強制（API不要・高速）
+python pdf_to_md.py --book 甲与权力 --mode text
 
 # ページ範囲指定（テスト用）
-python E:\Books\pdf2epub\scripts\pdf_to_md.py --book 易经 --start 1 --end 10
+python pdf_to_md.py --book 叔本华论说文集 --start 1 --end 5
 
 # 途中から再開
-python E:\Books\pdf2epub\scripts\pdf_to_md.py --book 易经 --resume
+python pdf_to_md.py --book 叔本华论说文集 --resume
+
+# Vision + LLM整形を一気に
+python pdf_to_md.py --book 叔本华论说文集 --mode vision --llm-fix
 ```
 
-### 出力ファイル
+---
 
-| ファイル | 内容 |
+## build_epub.py 単体実行
+
+MDファイルの自動選択優先順位：`_llm_fixed.md` → `_vision.md` → `_combined.md`
+
+```powershell
+# 自動選択（おすすめ）
+python build_epub.py --book 易经 --title "易经" --author "著者名"
+
+# LLM整形済みを強制使用
+python build_epub.py --book 易经 --use-llm
+
+# LLM整形なしで変換
+python build_epub.py --book 易经 --no-llm
+```
+
+---
+
+## MDファイルの流れ
+
+**Visionモード（画像PDF）:**
+```
+md\{book}_pages\0001.md ...   ← ページキャッシュ（再開用）
+    ↓
+md\{book}_vision.md           ← 全ページ結合MD
+    ↓ (--llm-fix時)
+md\{book}_llm_fixed.md        ← LLM整形済み
+    ↓
+epub\{book}.epub              ← 完成
+```
+
+**Textモード（テキストPDF）:**
+```
+md\{book}_vision.md           ← テキスト抽出結果
+    ↓ (LLM整形時)
+md\{book}_llm_fixed.md        ← LLM整形済み
+    ↓
+epub\{book}.epub              ← 完成
+```
+
+**Textモード（PaddleOCR旧来フロー）:**
+```
+paddle_output\{book}\         ← Step 1: OCR
+    ↓
+md\{book}_combined.md         ← Step 2: 結合
+    ↓
+md\{book}_llm_fixed.md        ← Step 3: LLM整形
+    ↓
+epub\{book}.epub              ← Step 4: 完成
+```
+
+---
+
+## 主な引数一覧
+
+### run.py
+
+| 引数 | デフォルト | 内容 |
+|---|---|---|
+| `--book` | 必須 | 本のタイトル（PDFファイル名） |
+| `--mode` | `auto` | `auto` / `vision` / `text` |
+| `--llm-fix` | OFF | Vision/auto時にLLM整形も実行 |
+| `--model` | `gemini-2.5-flash` | Geminiモデル |
+| `--resume` | OFF | ページキャッシュから再開 |
+| `--threshold` | `50` | テキストPDF判定の文字数閾値 |
+| `--skip-ocr` | OFF | Step 1スキップ |
+| `--skip-llm` | OFF | Step 3スキップ |
+| `--skip-epub` | OFF | Step 4スキップ |
+| `--lang` | `zh-CN` | EPUB言語メタデータ |
+
+### pdf_to_md.py
+
+| 引数 | デフォルト | 内容 |
+|---|---|---|
+| `--book` | 必須 | 本のタイトル |
+| `--mode` | `auto` | `auto` / `vision` / `text` |
+| `--llm-fix` | OFF | MD出力後にLLM整形も実行 |
+| `--model` | `gemini-2.5-flash` | Geminiモデル |
+| `--start` | `1` | 開始ページ |
+| `--end` | 最終ページ | 終了ページ |
+| `--resume` | OFF | ページキャッシュから再開 |
+| `--threshold` | `50` | 自動判定文字数閾値 |
+| `--dpi` | `150` | 画像化解像度 |
+
+---
+
+## Free Tier の制限（gemini-2.5-flash）
+
+| 制限 | 値 |
 |---|---|
-| `md/{book}_vision.md` | 全ページ結合済みMD |
-| `md/{book}_pages/0001.md` ... | ページ別キャッシュ（再開用） |
+| RPD（1日リクエスト数） | 500 |
+| RPM（1分リクエスト数） | 10 |
+| TPD（1日1日トークン） | 250万 |
 
-### Vision MD → EPUB
+**1日1回処理できる目安: Visionモードで素4旤500ページまで。**
 
-```powershell
-# _vision.md を _llm_fixed.md にリネームしてから実行
-Rename-Item "E:\Books\pdf2epub\md\{本名}_vision.md" "{本名}_llm_fixed.md"
-python E:\Books\pdf2epub\scripts\build_epub.py --book 易经 --title "易经" --author "著者名"
-```
-
----
-
-## MDを手動修正してEPUB化
-
-```powershell
-# MDを確認・編集
-notepad E:\Books\pdf2epub\md\{本名}_llm_fixed.md
-
-# EPUB化
-python E:\Books\pdf2epub\scripts\build_epub.py --book {本名} --title "タイトル" --author "著者名"
-```
-
----
-
-## 出力ファイルの流れ
-
-**方法1（OCR + LLM）:**
-```
-paddle_output\{book}\{book}_N.md   # Step 1: OCR
-    ↓
-md\{book}_combined.md              # Step 2: 結合
-    ↓
-md\{book}_llm_fixed.md             # Step 3: LLM整形
-    ↓
-epub\{book}.epub                   # Step 4: 完成
-```
-
-**方法2（Vision直接）:**
-```
-md\{book}_pages\0001.md ...        # ページ別キャッシュ
-    ↓
-md\{book}_vision.md                # 結合MD
-    ↓ (リネーム or 手動編集)
-epub\{book}.epub                   # 完成
-```
+リセット時刻: 太平洋標準時午前0時（JST 17:00）
