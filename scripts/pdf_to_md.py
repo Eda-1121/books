@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 """
-pdf_to_md.py
-PDFをページ番号順に画像化し、Gemini Vision APIで直接MDを生成する。
-
-Dependencies:
-    pip install pymupdf google-genai python-dotenv
-
-Usage:
-    python E:\\Books\\pdf2epub\\scripts\\pdf_to_md.py --book 易经
-    python E:\\Books\\pdf2epub\\scripts\\pdf_to_md.py --book 易经 --start 1 --end 10
-    python E:\\Books\\pdf2epub\\scripts\\pdf_to_md.py --book 易经 --resume
+pdf_to_md.py - debug version
 """
 
 import argparse
@@ -21,35 +12,32 @@ from pathlib import Path
 try:
     from dotenv import load_dotenv
 except ImportError:
-    print("ERROR: python-dotenv not installed. Run: pip install python-dotenv", file=sys.stderr)
+    print("ERROR: python-dotenv not installed.", file=sys.stderr)
     sys.exit(1)
 
 try:
-    import fitz  # pymupdf
+    import fitz
 except ImportError:
-    print("ERROR: pymupdf not installed. Run: pip install pymupdf", file=sys.stderr)
+    print("ERROR: pymupdf not installed.", file=sys.stderr)
     sys.exit(1)
 
 try:
     from google import genai
     from google.genai import types
 except ImportError:
-    print("ERROR: google-genai not installed. Run: pip install google-genai", file=sys.stderr)
+    print("ERROR: google-genai not installed.", file=sys.stderr)
     sys.exit(1)
 
 ENV_PATH = Path(__file__).parent / ".env"
 load_dotenv(ENV_PATH)
 
 PAGE_PROMPT = """このページの内容をMarkdown形式で正確に書き起こしてください。
-
 ルール：
 1. 章・節の見出しは # または ## を使用する
-2. 段落の改行と文章構造を正確に再現する
-3. 表は Markdown 表形式に変換する
-4. 箇条書きは - または 1. を使用する
-5. ページ番号やヘッダー・フッターは除外する
-6. 画像がある場合は [image] と記載する
-7. Markdownテキストのみ出力する（説明文不要）
+2. 段落構造を正確に再現する
+3. 表はMarkdown表形式に変換する
+4. ページ番号・ヘッダー・フッターは除外する
+5. Markdownテキストのみ出力（説明文不要）
 """
 
 RETRY_WAIT = 15
@@ -58,7 +46,7 @@ DPI        = 150
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="PDF → MD (Gemini Vision)")
+    p = argparse.ArgumentParser()
     p.add_argument("--book",   required=True)
     p.add_argument("--pdf",    default=r"E:\Books\pdf")
     p.add_argument("--md",     default=r"E:\Books\pdf2epub\md")
@@ -88,9 +76,7 @@ def process_page(client, model: str, page, page_num: int, total: int, dpi: int) 
         role="user",
         parts=[
             types.Part(text=PAGE_PROMPT),
-            types.Part(
-                inline_data=types.Blob(mime_type="image/png", data=img_bytes)
-            ),
+            types.Part(inline_data=types.Blob(mime_type="image/png", data=img_bytes)),
         ],
     )
     for attempt in range(4):
@@ -103,13 +89,15 @@ def process_page(client, model: str, page, page_num: int, total: int, dpi: int) 
             return response.text
         except Exception as e:
             err = str(e)
+            # フルエラーを必ず表示
+            print(f"  p.{page_num} FULL ERROR (attempt {attempt+1}): {err}", file=sys.stderr)
             if "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err:
                 wait = RETRY_WAIT * (attempt + 1)
-                print(f"  p.{page_num} rate limit, waiting {wait}s...")
+                print(f"  waiting {wait}s...")
                 time.sleep(wait)
             else:
-                print(f"  p.{page_num} ERROR: {e}", file=sys.stderr)
-                return f"<!-- page {page_num} error: {e} -->"
+                # rate limit以外はリトライしない
+                return f"<!-- page {page_num} error: {err} -->"
     return f"<!-- page {page_num} failed after retries -->"
 
 
@@ -122,6 +110,7 @@ def main():
     if not api_key:
         print(f"ERROR: GEMINI_API_KEY not set. Check {ENV_PATH}", file=sys.stderr)
         sys.exit(1)
+    print(f"API key loaded: {api_key[:8]}...")
 
     pdf_path = find_pdf(Path(args.pdf), args.book)
     if pdf_path is None:
@@ -136,7 +125,6 @@ def main():
     print(f"\n========================================")
     print(f" PDF → MD (Gemini Vision)")
     print(f" Book : {args.book}")
-    print(f" PDF  : {pdf_path}")
     print(f" Pages: {start} - {end} / {total}")
     print(f" Model: {args.model}")
     print(f"========================================")
@@ -164,7 +152,6 @@ def main():
     out_path = md_dir / f"{args.book}_vision.md"
     out_path.write_text("\n\n---\n\n".join(parts), encoding="utf-8")
     print(f"\nSaved: {out_path}")
-    print(f"Page cache: {page_dir}")
 
 
 if __name__ == "__main__":
